@@ -18,6 +18,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -141,6 +145,10 @@ button.primary:hover {
   cursor: pointer;
 }
 
+.data-field {
+  margin-top: 12px;
+}
+
 .check-field {
   display: flex;
   align-items: center;
@@ -166,6 +174,28 @@ button.primary:hover {
 
 .toolbar button {
   flex: 1;
+}
+
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mode-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
 .format-note {
@@ -216,9 +246,30 @@ button.primary:hover {
   padding: 12px 14px;
 }
 
+.warning {
+  border: 1px solid #f3d08a;
+  border-radius: 8px;
+  background: #fff8e6;
+  color: #7a4b00;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.warning strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #5f3a00;
+}
+
+.warning ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   overflow: hidden;
 }
 

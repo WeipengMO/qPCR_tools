@@ -38,17 +38,78 @@ D3,Drug,GAPDH,18.68
 D3,Drug,IL6,25.44
 D3,Drug,IL6,25.30`;
 
+const dualReferenceExampleData = `sample,group,gene,ct
+C1,Control,GAPDH,18.30
+C1,Control,GAPDH,18.42
+C1,Control,ACTB,19.10
+C1,Control,ACTB,19.02
+C1,Control,IL6,26.10
+C1,Control,IL6,26.00
+C2,Control,GAPDH,18.50
+C2,Control,GAPDH,18.47
+C2,Control,ACTB,19.20
+C2,Control,ACTB,19.17
+C2,Control,IL6,25.80
+C2,Control,IL6,25.92
+C3,Control,GAPDH,18.21
+C3,Control,GAPDH,18.36
+C3,Control,ACTB,18.94
+C3,Control,ACTB,19.05
+C3,Control,IL6,26.23
+C3,Control,IL6,26.18
+T1,Treatment,GAPDH,18.55
+T1,Treatment,GAPDH,18.49
+T1,Treatment,ACTB,19.26
+T1,Treatment,ACTB,19.19
+T1,Treatment,IL6,23.90
+T1,Treatment,IL6,23.83
+T2,Treatment,GAPDH,18.62
+T2,Treatment,GAPDH,18.71
+T2,Treatment,ACTB,19.34
+T2,Treatment,ACTB,19.45
+T2,Treatment,IL6,24.08
+T2,Treatment,IL6,24.00
+T3,Treatment,GAPDH,18.39
+T3,Treatment,GAPDH,18.44
+T3,Treatment,ACTB,19.10
+T3,Treatment,ACTB,19.15
+T3,Treatment,IL6,23.71
+T3,Treatment,IL6,23.88
+D1,Drug,GAPDH,18.70
+D1,Drug,GAPDH,18.63
+D1,Drug,ACTB,19.40
+D1,Drug,ACTB,19.35
+D1,Drug,IL6,25.18
+D1,Drug,IL6,25.24
+D2,Drug,GAPDH,18.58
+D2,Drug,GAPDH,18.61
+D2,Drug,ACTB,19.25
+D2,Drug,ACTB,19.30
+D2,Drug,IL6,25.07
+D2,Drug,IL6,25.01
+D3,Drug,GAPDH,18.73
+D3,Drug,GAPDH,18.68
+D3,Drug,ACTB,19.44
+D3,Drug,ACTB,19.39
+D3,Drug,IL6,25.44
+D3,Drug,IL6,25.30`;
+
 const state = {
   rows: [],
   result: null,
 };
 
+const technicalReplicateRangeThreshold = 0.5;
+
 const els = {
   dataInput: document.getElementById("dataInput"),
   loadExample: document.getElementById("loadExample"),
+  dualReferenceMode: document.getElementById("dualReferenceMode"),
   analyzeBtn: document.getElementById("analyzeBtn"),
   targetGene: document.getElementById("targetGene"),
   referenceGene: document.getElementById("referenceGene"),
+  referenceGene2: document.getElementById("referenceGene2"),
+  referenceGene2Field: document.getElementById("referenceGene2Field"),
   controlGroup: document.getElementById("controlGroup"),
   errorMode: document.getElementById("errorMode"),
   controlColor: document.getElementById("controlColor"),
@@ -56,9 +117,11 @@ const els = {
   showPoints: document.getElementById("showPoints"),
   showMeanLabels: document.getElementById("showMeanLabels"),
   message: document.getElementById("message"),
+  warning: document.getElementById("warning"),
   sampleCount: document.getElementById("sampleCount"),
   groupCount: document.getElementById("groupCount"),
   anovaP: document.getElementById("anovaP"),
+  controlMeanDeltaCt: document.getElementById("controlMeanDeltaCt"),
   chart: document.getElementById("chart"),
   groupTable: document.getElementById("groupTable"),
   sampleTable: document.getElementById("sampleTable"),
@@ -170,9 +233,13 @@ function normalizeHeader(header) {
 function updateSelectors(rows) {
   const genes = unique(rows.map((row) => row.gene));
   const groups = unique(rows.map((row) => row.group));
+  const reference = guessReference(genes);
+  const reference2 = guessSecondReference(genes, reference);
   setOptions(els.targetGene, genes, guessTarget(genes));
-  setOptions(els.referenceGene, genes, guessReference(genes));
+  setOptions(els.referenceGene, genes, reference);
+  setOptions(els.referenceGene2, genes, reference2);
   setOptions(els.controlGroup, groups, guessControl(groups));
+  updateModeUi();
 }
 
 function setOptions(select, values, preferred) {
@@ -194,7 +261,13 @@ function guessReference(genes) {
 
 function guessTarget(genes) {
   const reference = guessReference(genes);
-  return genes.find((gene) => gene !== reference) || genes[0] || "";
+  const reference2 = guessSecondReference(genes, reference);
+  return genes.find((gene) => gene !== reference && gene !== reference2) || genes.find((gene) => gene !== reference) || genes[0] || "";
+}
+
+function guessSecondReference(genes, referenceGene) {
+  const refs = ["actb", "b2m", "18s", "rplp0", "hprt1", "tbp", "gapdh"];
+  return genes.find((gene) => gene !== referenceGene && refs.includes(gene.toLowerCase())) || genes.find((gene) => gene !== referenceGene) || genes[0] || "";
 }
 
 function guessControl(groups) {
@@ -214,35 +287,87 @@ function orderGroups(groups, controlGroup) {
   });
 }
 
+function updateModeUi() {
+  els.referenceGene2Field.hidden = !els.dualReferenceMode.checked;
+}
+
+function validateGeneSelection(config) {
+  if (config.targetGene === config.referenceGene) {
+    throw new Error("目标基因不能和内参基因相同，请重新选择。");
+  }
+  if (config.dualReferenceMode && config.targetGene === config.referenceGene2) {
+    throw new Error("目标基因不能和第二内参相同，请重新选择。");
+  }
+  if (config.dualReferenceMode && config.referenceGene === config.referenceGene2) {
+    throw new Error("两个内参基因不能相同，请重新选择。");
+  }
+}
+
+function findTechnicalReplicateWarnings(rows, selectedGenes) {
+  const groups = new Map();
+  rows
+    .filter((row) => selectedGenes.has(row.gene))
+    .forEach((row) => {
+      const key = [row.sample, row.group, row.gene].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, { sample: row.sample, group: row.group, gene: row.gene, cts: [] });
+      }
+      groups.get(key).cts.push(row.ct);
+    });
+
+  return [...groups.values()]
+    .filter((entry) => entry.cts.length > 1)
+    .map((entry) => {
+      const minCt = Math.min(...entry.cts);
+      const maxCt = Math.max(...entry.cts);
+      return { ...entry, minCt, maxCt, range: maxCt - minCt };
+    })
+    .filter((entry) => entry.range > technicalReplicateRangeThreshold)
+    .sort((a, b) => b.range - a.range);
+}
+
 function analyze() {
   clearMessage();
+  clearWarning();
   try {
     const rows = parseInput(els.dataInput.value);
     state.rows = rows;
     updateSelectors(rows);
-    const result = calculate(rows, {
+    const config = {
+      dualReferenceMode: els.dualReferenceMode.checked,
       targetGene: els.targetGene.value,
       referenceGene: els.referenceGene.value,
+      referenceGene2: els.referenceGene2.value,
       controlGroup: els.controlGroup.value,
       errorMode: els.errorMode.value,
       controlColor: els.controlColor.value,
       treatmentColor: els.treatmentColor.value,
       showPoints: els.showPoints.checked,
       showMeanLabels: els.showMeanLabels.checked,
-    });
+    };
+    validateGeneSelection(config);
+    const result = calculate(rows, config);
     state.result = result;
     render(result);
+    const selectedGenes = new Set(config.dualReferenceMode ? [config.targetGene, config.referenceGene, config.referenceGene2] : [config.targetGene, config.referenceGene]);
+    showWarnings({
+      technicalReplicates: findTechnicalReplicateWarnings(rows, selectedGenes),
+      statsDisabledReason: result.statsDisabledReason,
+    });
   } catch (error) {
     showMessage(error.message);
   }
 }
 
 function calculate(rows, config) {
-  if (config.targetGene === config.referenceGene) {
-    throw new Error("目标基因和内参基因不能相同。");
+  const referenceGenes = config.dualReferenceMode ? [config.referenceGene, config.referenceGene2] : [config.referenceGene];
+  const distinctGenes = new Set([config.targetGene, ...referenceGenes]);
+  if (distinctGenes.size !== referenceGenes.length + 1) {
+    throw new Error(config.dualReferenceMode ? "目标基因、内参基因和第二内参不能相同。" : "目标基因和内参基因不能相同。");
   }
 
-  const filtered = rows.filter((row) => row.gene === config.targetGene || row.gene === config.referenceGene);
+  const selectedGenes = new Set([config.targetGene, ...referenceGenes]);
+  const filtered = rows.filter((row) => selectedGenes.has(row.gene));
   const technical = new Map();
   filtered.forEach((row) => {
     const key = [row.sample, row.group, row.gene].join("\u0001");
@@ -260,17 +385,18 @@ function calculate(rows, config) {
   });
 
   const samples = [...sampleMap.values()]
-    .filter((entry) => Number.isFinite(entry[config.targetGene]) && Number.isFinite(entry[config.referenceGene]))
+    .filter((entry) => Number.isFinite(entry[config.targetGene]) && referenceGenes.every((gene) => Number.isFinite(entry[gene])))
     .map((entry) => ({
       sample: entry.sample,
       group: entry.group,
       targetCt: entry[config.targetGene],
-      referenceCt: entry[config.referenceGene],
-      deltaCt: entry[config.targetGene] - entry[config.referenceGene],
+      referenceCt: mean(referenceGenes.map((gene) => entry[gene])),
+      referenceCts: Object.fromEntries(referenceGenes.map((gene) => [gene, entry[gene]])),
+      deltaCt: entry[config.targetGene] - mean(referenceGenes.map((gene) => entry[gene])),
     }));
 
   if (!samples.length) {
-    throw new Error("没有找到同时包含目标基因和内参基因 Ct 的样本。");
+    throw new Error(config.dualReferenceMode ? "没有找到同时包含目标基因和两个内参基因 Ct 的样本。" : "没有找到同时包含目标基因和内参基因 Ct 的样本。");
   }
 
   const groups = unique(samples.map((sample) => sample.group));
@@ -279,9 +405,8 @@ function calculate(rows, config) {
   }
 
   const controlSamples = samples.filter((sample) => sample.group === config.controlGroup);
-  if (controlSamples.length < 2) {
-    throw new Error("对照组至少需要 2 个生物样本用于统计检验。");
-  }
+  const statsDisabledReason =
+    controlSamples.length < 2 ? "对照组只有 1 个生物学重复，统计学检验已跳过；当前结果仅用于观察表达趋势。" : "";
 
   const controlMeanDeltaCt = mean(controlSamples.map((sample) => sample.deltaCt));
   const enrichedSamples = samples.map((sample) => ({
@@ -297,10 +422,10 @@ function calculate(rows, config) {
     const meanDeltaCt = mean(deltaCts);
     const deltaDeltaCt = meanDeltaCt - controlMeanDeltaCt;
     const foldChange = Math.pow(2, -deltaDeltaCt);
-    const spread = config.errorMode === "sd" ? std(deltaCts) : sem(deltaCts);
+    const spread = config.errorMode === "none" ? 0 : config.errorMode === "sd" ? std(deltaCts) : sem(deltaCts);
     const errorLower = Math.pow(2, -(deltaDeltaCt + spread));
     const errorUpper = Math.pow(2, -(deltaDeltaCt - spread));
-    const welch = group === config.controlGroup ? null : welchTTest(deltaCts, controlSamples.map((sample) => sample.deltaCt));
+    const welch = group === config.controlGroup || statsDisabledReason ? null : welchTTest(deltaCts, controlSamples.map((sample) => sample.deltaCt));
     return {
       group,
       n: groupSamples.length,
@@ -310,18 +435,22 @@ function calculate(rows, config) {
       errorMode: config.errorMode,
       errorLower,
       errorUpper,
-      displayError: Math.max(Math.abs(foldChange - errorLower), Math.abs(errorUpper - foldChange)),
-      pValue: welch ? welch.p : null,
+      displayError: config.errorMode === "none" ? null : Math.max(Math.abs(foldChange - errorLower), Math.abs(errorUpper - foldChange)),
+      pValue: statsDisabledReason && group !== config.controlGroup ? NaN : welch ? welch.p : null,
     };
   });
 
-  const anova = oneWayAnova(groups.map((group) => enrichedSamples.filter((sample) => sample.group === group).map((sample) => sample.deltaCt)));
+  const anova = statsDisabledReason
+    ? { f: NaN, p: NaN }
+    : oneWayAnova(groups.map((group) => enrichedSamples.filter((sample) => sample.group === group).map((sample) => sample.deltaCt)));
 
   return {
     config,
     samples: enrichedSamples,
     groups: groupResults,
     anova,
+    controlMeanDeltaCt,
+    statsDisabledReason,
   };
 }
 
@@ -329,9 +458,20 @@ function render(result) {
   els.sampleCount.textContent = String(result.samples.length);
   els.groupCount.textContent = String(result.groups.length);
   els.anovaP.textContent = Number.isFinite(result.anova.p) ? formatP(result.anova.p) : "-";
+  els.controlMeanDeltaCt.textContent = format(result.controlMeanDeltaCt);
   renderGroupTable(result.groups);
   renderSampleTable(result.samples);
   renderChart(result);
+}
+
+function renderEmptyState() {
+  els.sampleCount.textContent = "0";
+  els.groupCount.textContent = "0";
+  els.anovaP.textContent = "-";
+  els.controlMeanDeltaCt.textContent = "-";
+  els.groupTable.innerHTML = "";
+  els.sampleTable.innerHTML = "";
+  renderChart({ groups: [], samples: [], config: {} });
 }
 
 function renderGroupTable(groups) {
@@ -342,7 +482,7 @@ function renderGroupTable(groups) {
         <td>${row.n}</td>
         <td>${format(row.meanDeltaCt)}</td>
         <td>${format(row.foldChange)}</td>
-        <td>${format(row.displayError)}</td>
+        <td>${row.displayError === null ? "-" : format(row.displayError)}</td>
         <td>${row.pValue === null ? "control" : formatP(row.pValue)}</td>
         <td>${stars(row.pValue)}</td>
       </tr>`,
@@ -411,13 +551,17 @@ function renderChart(result) {
       const color = row.group === controlGroup ? controlColor : treatmentColor;
       const label = truncate(row.group, 14);
       const samplePoints = showPoints ? renderSamplePoints(pointsByGroup.get(row.group) || [], x, barW, y, i) : "";
+      const errorLines =
+        row.errorMode === "none"
+          ? ""
+          : `<line x1="${x + barW / 2}" x2="${x + barW / 2}" y1="${errTop}" y2="${errBottom}" stroke="#17202a" stroke-width="2"/>
+        <line x1="${x + barW / 2 - 8}" x2="${x + barW / 2 + 8}" y1="${errTop}" y2="${errTop}" stroke="#17202a" stroke-width="2"/>
+        <line x1="${x + barW / 2 - 8}" x2="${x + barW / 2 + 8}" y1="${errBottom}" y2="${errBottom}" stroke="#17202a" stroke-width="2"/>`;
       const meanLabel = showMeanLabels
         ? `<text x="${x + barW / 2}" y="${Math.min(top - 8, errTop - 8)}" text-anchor="middle" font-size="12" font-weight="700" fill="#17202a">${format(row.foldChange)}</text>`
         : "";
       return `<rect x="${x}" y="${top}" width="${barW}" height="${zero - top}" rx="3" fill="${color}"/>
-        <line x1="${x + barW / 2}" x2="${x + barW / 2}" y1="${errTop}" y2="${errBottom}" stroke="#17202a" stroke-width="2"/>
-        <line x1="${x + barW / 2 - 8}" x2="${x + barW / 2 + 8}" y1="${errTop}" y2="${errTop}" stroke="#17202a" stroke-width="2"/>
-        <line x1="${x + barW / 2 - 8}" x2="${x + barW / 2 + 8}" y1="${errBottom}" y2="${errBottom}" stroke="#17202a" stroke-width="2"/>
+        ${errorLines}
         ${samplePoints}
         <text x="${x + barW / 2}" y="${height - 44}" text-anchor="middle" font-size="13" fill="#263341">${escapeHtml(label)}</text>
         ${meanLabel}`;
@@ -645,6 +789,36 @@ function clearMessage() {
   els.message.textContent = "";
 }
 
+function showWarnings({ technicalReplicates, statsDisabledReason }) {
+  if (!technicalReplicates.length && !statsDisabledReason) {
+    clearWarning();
+    return;
+  }
+  const sections = [];
+  if (statsDisabledReason) {
+    sections.push(`<div>${escapeHtml(statsDisabledReason)}</div>`);
+  }
+  if (technicalReplicates.length) {
+    const visibleWarnings = technicalReplicates.slice(0, 8);
+    const hiddenCount = technicalReplicates.length - visibleWarnings.length;
+    const items = visibleWarnings
+      .map(
+        (entry) =>
+          `<li>${escapeHtml(entry.sample)} / ${escapeHtml(entry.group)} / ${escapeHtml(entry.gene)}：Ct 极差 ${format(entry.range)} (${format(entry.minCt)}-${format(entry.maxCt)})</li>`,
+      )
+      .join("");
+    const suffix = hiddenCount > 0 ? `<p>另有 ${hiddenCount} 组技术重复也超过阈值。</p>` : "";
+    sections.push(`<div>以下技术重复 Ct 极差超过 ${technicalReplicateRangeThreshold}，建议检查是否存在异常值；当前结果仍按技术重复平均值继续计算。</div><ul>${items}</ul>${suffix}`);
+  }
+  els.warning.innerHTML = `<strong>Warning</strong>${sections.join("")}`;
+  els.warning.hidden = false;
+}
+
+function clearWarning() {
+  els.warning.hidden = true;
+  els.warning.innerHTML = "";
+}
+
 function download(filename, content, type) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -707,15 +881,20 @@ function refreshFromText() {
 }
 
 els.loadExample.addEventListener("click", () => {
-  els.dataInput.value = exampleData;
-  updateSelectors(parseInput(exampleData));
+  const data = els.dualReferenceMode.checked ? dualReferenceExampleData : exampleData;
+  els.dataInput.value = data;
+  updateSelectors(parseInput(data));
   analyze();
 });
 
 els.analyzeBtn.addEventListener("click", analyze);
 els.dataInput.addEventListener("blur", refreshFromText);
+els.dualReferenceMode.addEventListener("change", () => {
+  updateModeUi();
+});
 els.targetGene.addEventListener("change", analyze);
 els.referenceGene.addEventListener("change", analyze);
+els.referenceGene2.addEventListener("change", analyze);
 els.controlGroup.addEventListener("change", analyze);
 els.errorMode.addEventListener("change", analyze);
 els.controlColor.addEventListener("input", analyze);
@@ -725,6 +904,5 @@ els.showMeanLabels.addEventListener("change", analyze);
 els.downloadSvg.addEventListener("click", downloadSvg);
 els.downloadCsv.addEventListener("click", downloadCsv);
 
-els.dataInput.value = exampleData;
-updateSelectors(parseInput(exampleData));
-analyze();
+updateModeUi();
+renderEmptyState();

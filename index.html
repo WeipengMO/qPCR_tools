@@ -15,15 +15,19 @@
             <p>直接粘贴 Ct 表格，计算目标基因相对内参和对照组的表达变化。</p>
           </div>
 
-          <label class="field">
+          <div class="toolbar">
+            <button id="loadExample" type="button">载入示例</button>
+            <label class="mode-toggle">
+              <input id="dualReferenceMode" type="checkbox">
+              <span>双内参</span>
+            </label>
+            <button id="analyzeBtn" type="button" class="primary">分析</button>
+          </div>
+
+          <label class="field data-field">
             <span>数据表</span>
             <textarea id="dataInput" spellcheck="false"></textarea>
           </label>
-
-          <div class="toolbar">
-            <button id="loadExample" type="button">载入示例</button>
-            <button id="analyzeBtn" type="button" class="primary">分析</button>
-          </div>
 
           <div class="format-note">
             <strong>表头：</strong>
@@ -47,6 +51,10 @@
               <span>内参基因</span>
               <select id="referenceGene"></select>
             </label>
+            <label class="field compact" id="referenceGene2Field" hidden>
+              <span>第二内参</span>
+              <select id="referenceGene2"></select>
+            </label>
             <label class="field compact">
               <span>对照组</span>
               <select id="controlGroup"></select>
@@ -56,6 +64,7 @@
               <select id="errorMode">
                 <option value="sem">SEM</option>
                 <option value="sd">SD</option>
+                <option value="none">无</option>
               </select>
             </label>
             <label class="field compact">
@@ -77,6 +86,7 @@
           </div>
 
           <div id="message" class="message" hidden></div>
+          <div id="warning" class="warning" hidden></div>
 
           <section class="summary-strip" aria-label="分析摘要">
             <div>
@@ -90,6 +100,10 @@
             <div>
               <span class="metric-label">ANOVA p</span>
               <strong id="anovaP">-</strong>
+            </div>
+            <div>
+              <span class="metric-label">Control mean ΔCt</span>
+              <strong id="controlMeanDeltaCt">-</strong>
             </div>
           </section>
 
