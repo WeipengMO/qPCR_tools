@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>qPCR 2^-ΔΔCt 分析</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <aside class="panel input-panel">
+          <div class="panel-head">
+            <h1>qPCR 分析</h1>
+            <p>直接粘贴 Ct 表格，计算目标基因相对内参和对照组的表达变化。</p>
+          </div>
+
+          <label class="field">
+            <span>数据表</span>
+            <textarea id="dataInput" spellcheck="false"></textarea>
+          </label>
+
+          <div class="toolbar">
+            <button id="loadExample" type="button">载入示例</button>
+            <button id="analyzeBtn" type="button" class="primary">分析</button>
+          </div>
+
+          <div class="format-note">
+            <strong>表头：</strong>
+            sample, group, gene, ct。也支持“样本、分组、基因、Ct值”。支持 CSV、TSV 或直接从 Excel 复制。
+          </div>
+
+          <div class="stats-note">
+            <strong>统计说明</strong>
+            <p>ANOVA p：在所有分组的 ΔCt 上做单因素方差分析，判断总体是否存在组间差异。</p>
+            <p>Welch p：每个处理组与对照组在 ΔCt 上做 Welch t-test，用于两组比较；p &lt; 0.05 通常记为显著。</p>
+          </div>
+        </aside>
+
+        <section class="content">
+          <div class="panel controls">
+            <label class="field compact">
+              <span>目标基因</span>
+              <select id="targetGene"></select>
+            </label>
+            <label class="field compact">
+              <span>内参基因</span>
+              <select id="referenceGene"></select>
+            </label>
+            <label class="field compact">
+              <span>对照组</span>
+              <select id="controlGroup"></select>
+            </label>
+            <label class="field compact">
+              <span>误差线</span>
+              <select id="errorMode">
+                <option value="sem">SEM</option>
+                <option value="sd">SD</option>
+              </select>
+            </label>
+            <label class="field compact">
+              <span>对照组颜色</span>
+              <input id="controlColor" type="color" value="#7b8794">
+            </label>
+            <label class="field compact">
+              <span>处理组颜色</span>
+              <input id="treatmentColor" type="color" value="#2f80a7">
+            </label>
+            <label class="check-field">
+              <input id="showPoints" type="checkbox" checked>
+              <span>显示数据点</span>
+            </label>
+            <label class="check-field">
+              <input id="showMeanLabels" type="checkbox" checked>
+              <span>显示平均值</span>
+            </label>
+          </div>
+
+          <div id="message" class="message" hidden></div>
+
+          <section class="summary-strip" aria-label="分析摘要">
+            <div>
+              <span class="metric-label">样本数</span>
+              <strong id="sampleCount">0</strong>
+            </div>
+            <div>
+              <span class="metric-label">组数</span>
+              <strong id="groupCount">0</strong>
+            </div>
+            <div>
+              <span class="metric-label">ANOVA p</span>
+              <strong id="anovaP">-</strong>
+            </div>
+          </section>
+
+          <section class="chart-section">
+            <div class="section-title">
+              <h2>相对表达量</h2>
+              <div class="chart-actions">
+                <button id="downloadSvg" type="button">下载 SVG</button>
+                <button id="downloadCsv" type="button">下载结果 CSV</button>
+              </div>
+            </div>
+            <div id="chart" class="chart" role="img" aria-label="qPCR fold change bar chart"></div>
+          </section>
+
+          <section class="tables">
+            <div class="table-wrap">
+              <h2>分组结果</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Group</th>
+                    <th>n</th>
+                    <th>mean ΔCt</th>
+                    <th>Fold change</th>
+                    <th>Error</th>
+                    <th>Welch p</th>
+                    <th>Significance</th>
+                  </tr>
+                </thead>
+                <tbody id="groupTable"></tbody>
+              </table>
+            </div>
+
+            <div class="table-wrap">
+              <h2>样本明细</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Sample</th>
+                    <th>Group</th>
+                    <th>Target Ct</th>
+                    <th>Reference Ct</th>
+                    <th>ΔCt</th>
+                    <th>2^-ΔΔCt</th>
+                  </tr>
+                </thead>
+                <tbody id="sampleTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
