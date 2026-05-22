@@ -324,12 +324,14 @@ button.primary:hover {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fbfcfe;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .chart svg {
   display: block;
-  width: 100%;
+  min-width: 100%;
+  width: auto;
   height: auto;
 }
 

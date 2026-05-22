@@ -23,7 +23,7 @@ sample,group,gene,ct
 
 如果某组技术重复 Ct 极差超过 `0.5`，页面会显示 warning 提示检查异常值；该提示不阻断分析，计算仍会使用技术重复平均 Ct。
 
-如果对照组只有 1 个生物学重复，页面会显示 warning，并跳过 ANOVA 和 Welch t-test；此时结果只用于观察表达趋势。
+如果任一参与分析的组只有 1 个生物学重复，页面会显示 warning。只有所有组都满足 `n >= 2` 才进行 ANOVA；Welch t-test 会对每个处理组单独判断，只有该处理组和对照组都满足 `n >= 2` 才计算 p 值。统计不足时结果只用于观察表达趋势。
 
 ## 计算方法
 
@@ -32,19 +32,21 @@ sample,group,gene,ct
 3. 每个样本计算 `ΔΔCt = sample ΔCt - control mean ΔCt`
 4. 相对表达量为 `2^-ΔΔCt`
 
-单内参模式下，`reference Ct` 是所选内参基因 Ct。双内参模式下，`reference Ct` 是两个内参基因 Ct 的平均值。
+单内参模式下，`reference Ct` 是所选内参基因 Ct。双内参模式下，程序假设两个内参基因都适合作为稳定内参，并使用两个内参基因平均 Ct 的算术平均值作为 `reference Ct`。
 
 统计检验在 `ΔCt` 尺度上进行：
 
 - 非对照组 vs 对照组：Welch t-test
 - 多组总体差异：one-way ANOVA
 
+当前统计检验只支持独立样本设计。配对样本、重复测量或嵌套实验设计需要使用专门的统计模型，不能直接按这里的 Welch t-test 或 one-way ANOVA 解释。
+
 ## 使用
 
-打开：
+打开项目目录中的 `index.html`：
 
 ```text
-/data/user/mowp/workspace/qPCR_tools/index.html
+index.html
 ```
 
 页面内可以下载 SVG 图和结果 CSV。

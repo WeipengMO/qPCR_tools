@@ -352,9 +352,11 @@ function analyze() {
     const selectedGenes = new Set(config.dualReferenceMode ? [config.targetGene, config.referenceGene, config.referenceGene2] : [config.targetGene, config.referenceGene]);
     showWarnings({
       technicalReplicates: findTechnicalReplicateWarnings(rows, selectedGenes),
-      statsDisabledReason: result.statsDisabledReason,
+      statsWarnings: result.statsWarnings,
     });
   } catch (error) {
+    state.result = null;
+    renderEmptyState();
     showMessage(error.message);
   }
 }
@@ -405,8 +407,6 @@ function calculate(rows, config) {
   }
 
   const controlSamples = samples.filter((sample) => sample.group === config.controlGroup);
-  const statsDisabledReason =
-    controlSamples.length < 2 ? "对照组只有 1 个生物学重复，统计学检验已跳过；当前结果仅用于观察表达趋势。" : "";
 
   const controlMeanDeltaCt = mean(controlSamples.map((sample) => sample.deltaCt));
   const enrichedSamples = samples.map((sample) => ({
@@ -416,6 +416,14 @@ function calculate(rows, config) {
   }));
 
   const orderedGroups = orderGroups(groups, config.controlGroup);
+  const groupedDeltaCts = Object.fromEntries(orderedGroups.map((group) => [group, enrichedSamples.filter((sample) => sample.group === group).map((sample) => sample.deltaCt)]));
+  const undersizedGroups = orderedGroups.filter((group) => groupedDeltaCts[group].length < 2);
+  const statsWarnings = [];
+  const anovaSkippedReason = undersizedGroups.length
+    ? `ANOVA 已跳过：以下组生物学重复 n < 2：${undersizedGroups.map((group) => `${group} n=${groupedDeltaCts[group].length}`).join("，")}。只有所有参与分析的组都满足 n >= 2 才进行 ANOVA。`
+    : "";
+  if (anovaSkippedReason) statsWarnings.push(anovaSkippedReason);
+
   const groupResults = orderedGroups.map((group) => {
     const groupSamples = enrichedSamples.filter((sample) => sample.group === group);
     const deltaCts = groupSamples.map((sample) => sample.deltaCt);
@@ -425,7 +433,8 @@ function calculate(rows, config) {
     const spread = config.errorMode === "none" ? 0 : config.errorMode === "sd" ? std(deltaCts) : sem(deltaCts);
     const errorLower = Math.pow(2, -(deltaDeltaCt + spread));
     const errorUpper = Math.pow(2, -(deltaDeltaCt - spread));
-    const welch = group === config.controlGroup || statsDisabledReason ? null : welchTTest(deltaCts, controlSamples.map((sample) => sample.deltaCt));
+    const welch = group === config.controlGroup ? null : getWelchResult(deltaCts, groupedDeltaCts[config.controlGroup], group, config.controlGroup);
+    if (welch?.warning) statsWarnings.push(welch.warning);
     return {
       group,
       n: groupSamples.length,
@@ -436,13 +445,16 @@ function calculate(rows, config) {
       errorLower,
       errorUpper,
       displayError: config.errorMode === "none" ? null : Math.max(Math.abs(foldChange - errorLower), Math.abs(errorUpper - foldChange)),
-      pValue: statsDisabledReason && group !== config.controlGroup ? NaN : welch ? welch.p : null,
+      pValue: welch ? welch.p : null,
     };
   });
 
-  const anova = statsDisabledReason
+  const anova = anovaSkippedReason
     ? { f: NaN, p: NaN }
-    : oneWayAnova(groups.map((group) => enrichedSamples.filter((sample) => sample.group === group).map((sample) => sample.deltaCt)));
+    : oneWayAnova(orderedGroups.map((group) => groupedDeltaCts[group]));
+  if (!anovaSkippedReason && !Number.isFinite(anova.p)) {
+    statsWarnings.push("ANOVA p 无法计算：组内方差为 0 或数据不足，当前结果仅用于观察表达趋势。");
+  }
 
   return {
     config,
@@ -450,7 +462,7 @@ function calculate(rows, config) {
     groups: groupResults,
     anova,
     controlMeanDeltaCt,
-    statsDisabledReason,
+    statsWarnings,
   };
 }
 
@@ -513,15 +525,17 @@ function renderChart(result) {
     return;
   }
 
-  const width = 920;
+  const minWidth = 920;
   const height = 420;
   const margin = { top: 28, right: 24, bottom: 72, left: 72 };
+  const minBarW = 56;
+  const barGap = 22;
+  const width = Math.max(minWidth, margin.left + margin.right + groups.length * minBarW + Math.max(0, groups.length - 1) * barGap);
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
   const maxPointY = Math.max(...result.samples.map((sample) => sample.relativeExpression));
   const maxY = niceMax(Math.max(...groups.map((row) => row.errorUpper), maxPointY, 1.2));
-  const barGap = 22;
-  const barW = Math.max(30, (plotW - barGap * (groups.length - 1)) / groups.length);
+  const barW = Math.max(minBarW, (plotW - barGap * (groups.length - 1)) / groups.length);
   const y = (value) => margin.top + plotH - (value / maxY) * plotH;
   const zero = y(0);
   const ticks = 5;
@@ -568,7 +582,7 @@ function renderChart(result) {
     })
     .join("");
 
-  els.chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+  els.chart.innerHTML = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${width}" height="${height}" fill="#fbfcfe"/>
     ${grid}
     <line x1="${margin.left}" x2="${width - margin.right}" y1="${referenceY}" y2="${referenceY}" stroke="#b42318" stroke-width="1.5" stroke-dasharray="6 5"/>
@@ -618,6 +632,23 @@ function sem(values) {
   return values.length ? std(values) / Math.sqrt(values.length) : 0;
 }
 
+function getWelchResult(groupValues, controlValues, group, controlGroup) {
+  if (controlValues.length < 2 || groupValues.length < 2) {
+    return {
+      p: NaN,
+      warning: `Welch p 已跳过：${group} vs ${controlGroup} 需要两组都满足 n >= 2，目前 ${group} n=${groupValues.length}，${controlGroup} n=${controlValues.length}。`,
+    };
+  }
+  const result = welchTTest(groupValues, controlValues);
+  if (!Number.isFinite(result.p)) {
+    return {
+      ...result,
+      warning: `Welch p 无法计算：${group} vs ${controlGroup} 存在零方差或无法估计方差，当前比较仅用于观察趋势。`,
+    };
+  }
+  return result;
+}
+
 function welchTTest(a, b) {
   if (a.length < 2 || b.length < 2) return { t: NaN, df: NaN, p: NaN };
   const ma = mean(a);
@@ -626,8 +657,16 @@ function welchTTest(a, b) {
   const vb = variance(b);
   const sa = va / a.length;
   const sb = vb / b.length;
-  const t = (ma - mb) / Math.sqrt(sa + sb);
-  const df = ((sa + sb) ** 2) / (sa ** 2 / (a.length - 1) + sb ** 2 / (b.length - 1));
+  const standardError = Math.sqrt(sa + sb);
+  const dfDenominator = sa ** 2 / (a.length - 1) + sb ** 2 / (b.length - 1);
+  if (standardError === 0 || dfDenominator === 0) {
+    return { t: NaN, df: NaN, p: NaN };
+  }
+  const t = (ma - mb) / standardError;
+  const df = ((sa + sb) ** 2) / dfDenominator;
+  if (!Number.isFinite(t) || !Number.isFinite(df) || df <= 0) {
+    return { t: NaN, df: NaN, p: NaN };
+  }
   const p = 2 * (1 - studentTCdf(Math.abs(t), df));
   return { t, df, p: clamp(p, 0, 1) };
 }
@@ -646,7 +685,13 @@ function oneWayAnova(groups) {
   }, 0);
   const dfBetween = validGroups.length - 1;
   const dfWithin = all.length - validGroups.length;
+  if (ssWithin === 0 || dfWithin <= 0) {
+    return { f: NaN, p: NaN };
+  }
   const f = ssBetween / dfBetween / (ssWithin / dfWithin);
+  if (!Number.isFinite(f)) {
+    return { f: NaN, p: NaN };
+  }
   const p = 1 - fCdf(f, dfBetween, dfWithin);
   return { f, p: clamp(p, 0, 1) };
 }
@@ -789,14 +834,14 @@ function clearMessage() {
   els.message.textContent = "";
 }
 
-function showWarnings({ technicalReplicates, statsDisabledReason }) {
-  if (!technicalReplicates.length && !statsDisabledReason) {
+function showWarnings({ technicalReplicates, statsWarnings }) {
+  if (!technicalReplicates.length && !statsWarnings.length) {
     clearWarning();
     return;
   }
   const sections = [];
-  if (statsDisabledReason) {
-    sections.push(`<div>${escapeHtml(statsDisabledReason)}</div>`);
+  if (statsWarnings.length) {
+    sections.push(`<ul>${statsWarnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`);
   }
   if (technicalReplicates.length) {
     const visibleWarnings = technicalReplicates.slice(0, 8);
