@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>qPCR 2^-ΔΔCt 分析</title>
+    <title>qPCR 分析工具</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -12,12 +12,17 @@
         <aside class="panel input-panel">
           <div class="panel-head">
             <h1>qPCR 分析</h1>
-            <p>直接粘贴 Ct 表格，计算目标基因相对内参和对照组的表达变化。</p>
+            <p>直接粘贴 Ct 表格，选择 2^-ΔΔCt 对照分析或全基因表达量分析。</p>
+          </div>
+
+          <div class="module-switch" role="tablist" aria-label="qPCR 分析模块">
+            <button id="controlModuleBtn" type="button" class="active" data-module="control">对照归一</button>
+            <button id="expressionModuleBtn" type="button" data-module="expression">全基因表达量</button>
           </div>
 
           <div class="toolbar">
             <button id="loadExample" type="button">载入示例</button>
-            <label class="mode-toggle">
+            <label class="mode-toggle" data-analysis="control">
               <input id="dualReferenceMode" type="checkbox">
               <span>双内参</span>
             </label>
@@ -34,15 +39,21 @@
             sample, group, gene, ct。也支持“样本、分组、基因、Ct值”。支持 CSV、TSV 或直接从 Excel 复制。
           </div>
 
-          <div class="stats-note">
+          <div class="stats-note" data-analysis="control">
             <strong>统计说明</strong>
-            <p>ANOVA p：在所有分组的 ΔCt 上做单因素方差分析，判断总体是否存在组间差异。</p>
-            <p>Welch p：每个处理组与对照组在 ΔCt 上做 Welch t-test，用于两组比较；p &lt; 0.05 通常记为显著。</p>
+            <p>对照归一模块使用 ΔΔCt：先计算 ΔCt，再以对照组平均 ΔCt 得到 2^-ΔΔCt。</p>
+            <p>ANOVA 和 Welch t-test 均在 ΔCt 上进行；非数字 Ct 会被自动忽略并在 warning 中列出。</p>
+          </div>
+
+          <div class="stats-note" data-analysis="expression" hidden>
+            <strong>统计说明</strong>
+            <p>全基因模块使用 ΔCt：技术重复取平均后，ΔCt = Ct_target - Ct_ref，支持单内参或双内参。</p>
+            <p>按 group 绘制不同基因的 barplot，Y 轴可选 2^-ΔCt、-ΔCt 或 2^-ΔCt × 10³；该模块不做统计检验。</p>
           </div>
         </aside>
 
         <section class="content">
-          <div class="panel controls">
+          <div class="panel controls" data-analysis="control">
             <label class="field compact">
               <span>目标基因</span>
               <select id="targetGene"></select>
@@ -85,71 +96,96 @@
             </label>
           </div>
 
+          <div class="panel controls" data-analysis="expression" hidden>
+            <label class="field compact">
+              <span>内参基因</span>
+              <select id="expressionReferenceGene"></select>
+            </label>
+            <label class="field compact" id="expressionReferenceGene2Field" hidden>
+              <span>第二内参</span>
+              <select id="expressionReferenceGene2"></select>
+            </label>
+            <label class="check-field">
+              <input id="expressionDualReferenceMode" type="checkbox">
+              <span>双内参</span>
+            </label>
+            <label class="field compact gene-picker-field">
+              <span>展示基因</span>
+              <div id="expressionGenePicker" class="gene-picker">
+                <div id="expressionGeneTags" class="gene-tags"></div>
+                <input id="expressionGeneInput" list="expressionGeneOptions" type="text" placeholder="输入基因后回车">
+                <datalist id="expressionGeneOptions"></datalist>
+                <button id="expressionSelectAllGenes" type="button">全选</button>
+              </div>
+            </label>
+            <label class="field compact">
+              <span>Y 轴</span>
+              <select id="expressionYAxis">
+                <option value="relative">2^-ΔCt</option>
+                <option value="negativeDelta">-ΔCt</option>
+                <option value="relativeScaled">2^-ΔCt × 10³</option>
+              </select>
+            </label>
+            <label class="field compact">
+              <span>误差线</span>
+              <select id="expressionErrorMode">
+                <option value="sem">SEM</option>
+                <option value="sd">SD</option>
+                <option value="none">无</option>
+              </select>
+            </label>
+            <label class="check-field">
+              <input id="expressionShowPoints" type="checkbox" checked>
+              <span>显示数据点</span>
+            </label>
+          </div>
+
           <div id="message" class="message" hidden></div>
           <div id="warning" class="warning" hidden></div>
 
           <section class="summary-strip" aria-label="分析摘要">
             <div>
-              <span class="metric-label">样本数</span>
+              <span id="metricOneLabel" class="metric-label">样本数</span>
               <strong id="sampleCount">0</strong>
             </div>
             <div>
-              <span class="metric-label">组数</span>
+              <span id="metricTwoLabel" class="metric-label">组数</span>
               <strong id="groupCount">0</strong>
             </div>
             <div>
-              <span class="metric-label">ANOVA p</span>
+              <span id="metricThreeLabel" class="metric-label">ANOVA p</span>
               <strong id="anovaP">-</strong>
             </div>
             <div>
-              <span class="metric-label">Control mean ΔCt</span>
+              <span id="metricFourLabel" class="metric-label">Control mean ΔCt</span>
               <strong id="controlMeanDeltaCt">-</strong>
             </div>
           </section>
 
           <section class="chart-section">
             <div class="section-title">
-              <h2>相对表达量</h2>
+              <h2 id="chartTitle">相对表达量</h2>
               <div class="chart-actions">
                 <button id="downloadSvg" type="button">下载 SVG</button>
                 <button id="downloadCsv" type="button">下载结果 CSV</button>
               </div>
             </div>
-            <div id="chart" class="chart" role="img" aria-label="qPCR fold change bar chart"></div>
+            <div id="chart" class="chart" role="img" aria-label="qPCR analysis chart"></div>
           </section>
 
           <section class="tables">
             <div class="table-wrap">
-              <h2>分组结果</h2>
+              <h2 id="groupTableTitle">分组结果</h2>
               <table>
-                <thead>
-                  <tr>
-                    <th>Group</th>
-                    <th>n</th>
-                    <th>mean ΔCt</th>
-                    <th>Fold change</th>
-                    <th>Error</th>
-                    <th>Welch p</th>
-                    <th>Significance</th>
-                  </tr>
-                </thead>
+                <thead id="groupTableHead"></thead>
                 <tbody id="groupTable"></tbody>
               </table>
             </div>
 
             <div class="table-wrap">
-              <h2>样本明细</h2>
+              <h2 id="sampleTableTitle">样本明细</h2>
               <table>
-                <thead>
-                  <tr>
-                    <th>Sample</th>
-                    <th>Group</th>
-                    <th>Target Ct</th>
-                    <th>Reference Ct</th>
-                    <th>ΔCt</th>
-                    <th>2^-ΔΔCt</th>
-                  </tr>
-                </thead>
+                <thead id="sampleTableHead"></thead>
                 <tbody id="sampleTable"></tbody>
               </table>
             </div>

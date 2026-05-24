@@ -166,6 +166,33 @@ button.primary:hover {
   accent-color: var(--accent);
 }
 
+
+.module-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 14px 0 12px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.module-switch button {
+  min-height: 36px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.module-switch button.active {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--accent-dark);
+  box-shadow: 0 3px 10px rgba(22, 33, 45, 0.08);
+}
+
 .toolbar {
   display: flex;
   gap: 10px;
@@ -236,6 +263,76 @@ button.primary:hover {
   grid-template-columns: repeat(4, minmax(120px, 1fr));
   gap: 12px;
   padding: 14px;
+}
+
+
+.gene-picker-field {
+  grid-column: span 2;
+}
+
+.gene-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.gene-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gene-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 150px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.gene-tag span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gene-tag button {
+  min-height: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.gene-picker input {
+  flex: 1;
+  min-width: 110px;
+  height: 28px;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+}
+
+.gene-picker > button {
+  min-height: 28px;
+  padding: 0 9px;
+  white-space: nowrap;
 }
 
 .message {
