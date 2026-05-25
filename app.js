@@ -181,6 +181,7 @@ const els = {
   expressionGeneOptions: document.getElementById("expressionGeneOptions"),
   expressionSelectAllGenes: document.getElementById("expressionSelectAllGenes"),
   expressionYAxis: document.getElementById("expressionYAxis"),
+  expressionGrouping: document.getElementById("expressionGrouping"),
   expressionErrorMode: document.getElementById("expressionErrorMode"),
   controlColor: document.getElementById("controlColor"),
   treatmentColor: document.getElementById("treatmentColor"),
@@ -516,6 +517,7 @@ function analyze() {
         referenceGene: els.expressionReferenceGene.value,
         referenceGene2: els.expressionReferenceGene2.value,
         yAxis: els.expressionYAxis.value,
+        grouping: els.expressionGrouping.value || "sample",
         errorMode: els.expressionErrorMode.value,
         showPoints: els.expressionShowPoints.checked,
         selectedGenes: [...state.expressionSelectedGenes],
@@ -782,7 +784,8 @@ function render(result) {
 
 function renderExpression(result) {
   const displayLabel = getExpressionYAxisLabel(result.config.yAxis);
-  els.chart.setAttribute("aria-label", `qPCR full-gene expression grouped bar chart, y-axis ${displayLabel}`);
+  const groupingLabel = getExpressionGroupingLabel(result.config.grouping);
+  els.chart.setAttribute("aria-label", `qPCR full-gene expression bar chart, grouped ${groupingLabel}, y-axis ${displayLabel}`);
   els.metricOneLabel.textContent = "样本数";
   els.metricTwoLabel.textContent = "Target genes";
   els.metricThreeLabel.textContent = "分组数";
@@ -801,7 +804,7 @@ function renderExpression(result) {
 
 function renderEmptyState() {
   if (state.module === "expression") {
-    els.chart.setAttribute("aria-label", `qPCR full-gene expression grouped bar chart, y-axis ${getExpressionYAxisLabel(els.expressionYAxis.value || "relative")}`);
+    els.chart.setAttribute("aria-label", `qPCR full-gene expression bar chart, grouped ${getExpressionGroupingLabel(els.expressionGrouping.value || "sample")}, y-axis ${getExpressionYAxisLabel(els.expressionYAxis.value || "relative")}`);
     els.metricOneLabel.textContent = "样本数";
     els.metricTwoLabel.textContent = "Target genes";
     els.metricThreeLabel.textContent = "分组数";
@@ -813,9 +816,9 @@ function renderEmptyState() {
     els.groupCount.textContent = "0";
     els.anovaP.textContent = "0";
     els.controlMeanDeltaCt.textContent = getExpressionYAxisLabel(els.expressionYAxis.value || "relative");
-    renderExpressionSummaryTable({ summaries: [], config: { yAxis: els.expressionYAxis.value || "relative" } });
+    renderExpressionSummaryTable({ summaries: [], config: { yAxis: els.expressionYAxis.value || "relative", grouping: els.expressionGrouping.value || "sample" } });
     renderExpressionSampleTable([]);
-    renderExpressionChart({ summaries: [], samples: [], genes: [], groups: [], config: { yAxis: els.expressionYAxis.value || "relative" } });
+    renderExpressionChart({ summaries: [], samples: [], genes: [], groups: [], config: { yAxis: els.expressionYAxis.value || "relative", grouping: els.expressionGrouping.value || "sample" } });
     return;
   }
   els.chart.setAttribute("aria-label", "qPCR control-normalized 2^-ΔΔCt fold change bar chart");
@@ -1026,20 +1029,24 @@ function renderExpressionChart(result) {
   }
 
   const palette = ["#127c74", "#2f80a7", "#b7791f", "#805ad5", "#c05621", "#4a5568", "#2f855a", "#b83280"];
+  const grouping = result.config.grouping || "sample";
+  const groupByGene = grouping === "gene";
+  const primaryItems = groupByGene ? result.genes : result.groups;
+  const seriesItems = groupByGene ? result.groups : result.genes;
   const minWidth = 980;
   const baseHeight = 450;
   const margin = { top: 28, right: 24, bottom: 92, left: 76 };
-  const geneGap = 7;
+  const barGap = 7;
   const groupGap = 58;
   const minBarW = 18;
-  const barsPerGroup = Math.max(1, result.genes.length);
-  const clusterW = barsPerGroup * minBarW + Math.max(0, barsPerGroup - 1) * geneGap;
-  const width = Math.max(minWidth, margin.left + margin.right + result.groups.length * clusterW + Math.max(0, result.groups.length - 1) * groupGap);
+  const barsPerCluster = Math.max(1, seriesItems.length);
+  const clusterW = barsPerCluster * minBarW + Math.max(0, barsPerCluster - 1) * barGap;
+  const width = Math.max(minWidth, margin.left + margin.right + primaryItems.length * clusterW + Math.max(0, primaryItems.length - 1) * groupGap);
   const legendItemW = 120;
   const legendRowH = 20;
   const legendMaxW = Math.max(legendItemW, width - margin.left - margin.right);
   const legendCols = Math.max(1, Math.floor(legendMaxW / legendItemW));
-  const legendRows = Math.ceil(result.genes.length / legendCols);
+  const legendRows = Math.ceil(seriesItems.length / legendCols);
   const height = baseHeight + Math.max(0, legendRows - 1) * legendRowH;
   const plotH = baseHeight - margin.top - margin.bottom;
   const yValues = summaries.flatMap((row) => [row.displayValue, row.displayError === null ? row.displayValue : row.displayValue + row.displayError, row.displayError === null ? row.displayValue : row.displayValue - row.displayError]);
@@ -1068,45 +1075,50 @@ function renderExpressionChart(result) {
     sampleLookup.get(key).push(sample);
   });
 
-  const bars = result.groups
-    .map((group, groupIndex) => {
-      const groupX = margin.left + groupIndex * (clusterW + groupGap);
-      const groupBars = result.genes
-        .map((gene, geneIndex) => {
-          const row = summaries.find((item) => item.group === group && item.gene === gene);
+  const findSummary = (primary, series) => summaries.find((item) => (groupByGene ? item.gene === primary && item.group === series : item.group === primary && item.gene === series));
+  const sampleKey = (primary, series) => (groupByGene ? [series, primary].join("\u0001") : [primary, series].join("\u0001"));
+  const titleText = (primary, series, value) => groupByGene ? `${series} / ${primary}: ${format(value)}` : `${primary} / ${series}: ${format(value)}`;
+
+  const bars = primaryItems
+    .map((primary, primaryIndex) => {
+      const groupX = margin.left + primaryIndex * (clusterW + groupGap);
+      const clusterBars = seriesItems
+        .map((series, seriesIndex) => {
+          const row = findSummary(primary, series);
           if (!row) return "";
-          const x = groupX + geneIndex * (minBarW + geneGap);
+          const x = groupX + seriesIndex * (minBarW + barGap);
           const valueY = y(row.displayValue);
           const barY = Math.min(valueY, zero);
           const barH = Math.abs(zero - valueY);
-          const color = palette[geneIndex % palette.length];
+          const color = palette[seriesIndex % palette.length];
           const errTop = row.displayError === null ? valueY : y(row.displayValue + row.displayError);
           const errBottom = row.displayError === null ? valueY : y(row.displayValue - row.displayError);
-          const points = result.config.showPoints ? renderExpressionPoints(sampleLookup.get([group, gene].join("\u0001")) || [], x, minBarW, y, groupIndex + geneIndex, result.config.yAxis) : "";
+          const points = result.config.showPoints ? renderExpressionPoints(sampleLookup.get(sampleKey(primary, series)) || [], x, minBarW, y, primaryIndex + seriesIndex, result.config.yAxis) : "";
           const errorLines = row.displayError === null ? "" : `<line x1="${x + minBarW / 2}" x2="${x + minBarW / 2}" y1="${errTop}" y2="${errBottom}" stroke="#17202a" stroke-width="1.4"/>
             <line x1="${x + minBarW / 2 - 5}" x2="${x + minBarW / 2 + 5}" y1="${errTop}" y2="${errTop}" stroke="#17202a" stroke-width="1.4"/>
             <line x1="${x + minBarW / 2 - 5}" x2="${x + minBarW / 2 + 5}" y1="${errBottom}" y2="${errBottom}" stroke="#17202a" stroke-width="1.4"/>`;
           return `<rect x="${x}" y="${barY}" width="${minBarW}" height="${barH}" rx="3" fill="${color}">
-              <title>${escapeHtml(group)} / ${escapeHtml(gene)}: ${format(row.displayValue)}</title>
+              <title>${escapeHtml(titleText(primary, series, row.displayValue))}</title>
             </rect>${errorLines}${points}`;
         })
         .join("");
-      return `${groupBars}<text x="${groupX + clusterW / 2}" y="${baseHeight - 58}" text-anchor="middle" font-size="13" fill="#263341">${escapeHtml(truncate(group, 16))}</text>`;
+      return `${clusterBars}<text x="${groupX + clusterW / 2}" y="${baseHeight - 58}" text-anchor="middle" font-size="13" fill="#263341">${escapeHtml(truncate(primary, 16))}</text>`;
     })
     .join("");
 
-  const legend = result.genes
-    .map((gene, index) => {
+  const legend = seriesItems
+    .map((item, index) => {
       const col = index % legendCols;
       const row = Math.floor(index / legendCols);
       const x = margin.left + col * legendItemW;
       const yPos = baseHeight - 22 + row * legendRowH;
       return `<rect x="${x}" y="${yPos - 10}" width="12" height="12" rx="2" fill="${palette[index % palette.length]}"/>
-        <text x="${x + 18}" y="${yPos}" font-size="12" fill="#334155">${escapeHtml(truncate(gene, 12))}</text>`;
+        <text x="${x + 18}" y="${yPos}" font-size="12" fill="#334155">${escapeHtml(truncate(item, 12))}</text>`;
     })
     .join("");
 
   const yAxisLabel = getExpressionYAxisLabel(result.config.yAxis);
+  const groupingTitle = groupByGene ? "Gene · groups" : "Sample group · genes";
   els.chart.innerHTML = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${width}" height="${height}" fill="#fbfcfe"/>
     ${grid}
@@ -1114,7 +1126,7 @@ function renderExpressionChart(result) {
     <line x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${baseHeight - margin.bottom}" stroke="#17202a"/>
     ${bars}
     ${legend}
-    <text x="${margin.left}" y="20" font-size="13" fill="#334155">Group · genes</text>
+    <text x="${margin.left}" y="20" font-size="13" fill="#334155">${groupingTitle}</text>
     <text x="22" y="${margin.top + plotH / 2}" transform="rotate(-90 22 ${margin.top + plotH / 2})" text-anchor="middle" font-size="13" fill="#334155">${escapeHtml(yAxisLabel)}</text>
   </svg>`;
 }
@@ -1138,6 +1150,10 @@ function getExpressionYAxisLabel(yAxis) {
   if (yAxis === "negativeDelta") return "-ΔCt";
   if (yAxis === "relativeScaled") return "2^-ΔCt × 10³";
   return "2^-ΔCt";
+}
+
+function getExpressionGroupingLabel(grouping) {
+  return grouping === "gene" ? "by gene" : "by sample group";
 }
 
 
@@ -1562,6 +1578,7 @@ els.errorMode.addEventListener("change", analyze);
 els.expressionReferenceGene.addEventListener("change", analyze);
 els.expressionReferenceGene2.addEventListener("change", analyze);
 els.expressionYAxis.addEventListener("change", analyze);
+els.expressionGrouping.addEventListener("change", analyze);
 els.expressionErrorMode.addEventListener("change", analyze);
 els.controlColor.addEventListener("input", analyze);
 els.treatmentColor.addEventListener("input", analyze);
